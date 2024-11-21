@@ -20,25 +20,24 @@ class _DashboardPageState extends State<DashboardPage> {
     Colors.blue,
     Colors.yellow,
   ];
+  int _selectedTimeUnit = 3;
+  List<String> timeUnits = [
+    'seconds',
+    'minutes',
+    'hours',
+    'days'
+  ];
   int toggle0 = 1;
   Offset modeBar = Offset(0,0);
   int _value = 0;
-  int _threshold = 50;
+  int _threshold0 = 50;
+  int _threshold1 = 50;
   String autoWateringTime = '0';
-  String threshold = '50';
+  String threshold0 = '50';
+  String threshold1 = '50';
   String activeThreshold0 = '50';
   String activeThreshold1 = '50';
   int _currentIndex = 0;
-  int _previousIndex = 0;
-  List<Offset> offset = [
-    Offset(0,0),
-    Offset(2,0),
-    Offset(4,0),
-  ];
-  List<Offset> offsetData = [
-    Offset(0,0),
-    Offset(2,0),
-  ];
   bool _currentIndexData = false;
   final MqttService mqttService = MqttService();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
@@ -48,12 +47,10 @@ class _DashboardPageState extends State<DashboardPage> {
   int _currentPlan = 0;
   Duration duration = const Duration(hours: 0, minutes: 0, seconds: 0);
   int interval = 0;
-  final ScrollController _scrollController = ScrollController();
-  int _selectedItemIndex = 0;
-  List<String> items = List.generate(10, (index) => 'Item $index'); // Example list of items
   GlobalKey<ScrollSnapListState> sslKey = GlobalKey();
   GlobalKey<ScrollSnapListState> sslKeyData = GlobalKey();
-
+  String planIsActive0 = 'false';
+  String planIsActive1 = 'false';
 
   @override
   void initState() {
@@ -62,40 +59,47 @@ class _DashboardPageState extends State<DashboardPage> {
     _setupMqttConnection();
   }
 
-  void _centerSelectedItem() {
-    double screenWidth = MediaQuery.of(context).size.width;
-    double itemWidth = screenWidth; // Example item width
-    double targetOffset = (_selectedItemIndex * itemWidth) - (screenWidth / 2) + (itemWidth / 2);
-    _scrollController.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
-  }
-
   Future<void> _setupMqttConnection() async {
     await mqttService.connect();
     mqttService.subscribeToTopic('esp32/$deviceID/+/data');
+    mqttService.subscribeToTopic('esp32/$deviceID/+/planIsActive');
     mqttService.listenToMessages((topic, message) {
       if (topic.split('/')[2] == "sensor0") {
         setState(() {
           status0 = message;
         });
       }
-      if (topic.split('/')[2] == "sensor1") {
+      else if (topic.split('/')[2] == "sensor1") {
         setState(() {
           status1 = message;
         });
       }
-      if (topic.split('/')[2] == "pump0"){
-        setState(() {
-          activeThreshold0 = message;
-        });
+      else if (topic.split('/')[2] == "pump0"){
+        if (topic.split('/')[3] == 'control') {
+          setState(() {
+            activeThreshold0 = message;
+          });
+        }
+        else if (topic.split('/')[3] == 'planIsActive'){
+          setState(() {
+            print(planIsActive0);
+            planIsActive0 = message;
+            print(planIsActive0);
+          });
+        }
       }
-      if (topic.split('/')[2] == "pump1"){
-        setState(() {
-          activeThreshold1 = message;
-        });
+      else if (topic.split('/')[2] == "pump1"){
+        if (topic.split('/')[3] == 'control') {
+          setState(() {
+            activeThreshold1 = message;
+          });
+        }
+        else if (topic.split('/')[3] == 'planIsActive'){
+          setState(() {
+            print('PORCODIO');
+            planIsActive1 = message;
+          });
+        }
       }
     });
   }
@@ -132,17 +136,6 @@ class _DashboardPageState extends State<DashboardPage> {
   void _updateIndexData(){
     int curr = _currentIndexData? 1:0;
     int prev = !_currentIndexData?1:0;
-    double diffData = (curr - prev).toDouble();
-    setState(() {
-      _currentIndexData = !_currentIndexData;
-      for (var i = 0; i<2; i++){
-        setState(() {
-          print(offset[i]);
-          offsetData[i] = Offset(offsetData[i].dx + diffData*2, 0);
-          print(offset[i]);
-        });
-      }
-    });
   }
 
   List<int> getTimeNow(){
@@ -154,25 +147,12 @@ class _DashboardPageState extends State<DashboardPage> {
 
   void _updateIndex(int newIndex) {
     setState(() {
-      _previousIndex = _currentIndex;
       _currentIndex = newIndex;
-      print(_currentIndex);
-      print(_previousIndex);
-    });
-    double diff = (_currentIndex - _previousIndex).toDouble();
-    for (var i = 0; i<3; i++){
-      setState(() {
-        print(offset[i]);
-        offset[i] = Offset(offset[i].dx - diff*2, 0);
-        print(offset[i]);
-      });
-    }
-    setState(() {
       modeBar = [
         Offset(0,0),
         Offset(1,0).scale(1.23, 0),
         Offset(2,0).scale(1.165, 0)
-      ][_currentIndex];
+      ][newIndex];
     });
   }
 
@@ -194,7 +174,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  void planCommand(bool pump, String timeout, int interval, int dt) {
+  void planCommand(bool pump, String timeout, String interval, int dt) {
     if (deviceID.isNotEmpty) {
       String message = '$timeout&$interval&$dt';
       mqttService.publishMessage('esp32/$deviceID/pump${(pump)?1:0}/plan', message);
@@ -340,7 +320,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ),
             NumberPicker(
-              value: _threshold,
+              value: (_currentIndexData)? _threshold1 : _threshold0,
               minValue: 0,
               maxValue: 100,
               haptics: true,
@@ -354,12 +334,18 @@ class _DashboardPageState extends State<DashboardPage> {
                 fontSize: MediaQuery.of(context).size.height/40,
                 ),
               onChanged: (value) => setState(() {
-                _threshold = value;
-                threshold = _threshold.toString();
+                if (_currentIndexData){
+                  _threshold1 = value;
+                  threshold1 = _threshold1.toString();
+                }
+                else {
+                  _threshold0 = value;
+                  threshold0 = _threshold0.toString();
+                }
               }),
             ),
             ElevatedButton(
-              onPressed: () => setThreshold(_currentIndexData, threshold),
+              onPressed: () => setThreshold(_currentIndexData, (_currentIndexData)? threshold1 : threshold0),
               style: ElevatedButton.styleFrom(
                 foregroundColor: Colors.white, backgroundColor: Colors.blue, shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(MediaQuery.of(context).size.height/20),
@@ -367,7 +353,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 padding: EdgeInsets.all(MediaQuery.of(context).size.height/60), // Text color
               ),
               child: Text(
-                'Set Threshold to $threshold%',
+                'Set Threshold to ${(_currentIndexData)? threshold1 : threshold0}%',
                 style: TextStyle(
                   color: Colors.black,
                   fontSize: MediaQuery.of(context).size.height/50,
@@ -381,12 +367,25 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            Text(
-              'Select Time and Frequency:',
-              style: TextStyle(
-                color: Colors.yellow,
-                fontSize: MediaQuery.of(context).size.height/50,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children:[
+                Text(
+                  'Select Time and Frequency:',
+                  style: TextStyle(
+                    color: Colors.yellow,
+                    fontSize: MediaQuery.of(context).size.height/50,
+                  ),
+                ),
+                Container(
+                  width: MediaQuery.of(context).size.height/50,
+                  height: MediaQuery.of(context).size.height/50,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: (_currentIndexData)? ((planIsActive1 == 'true')? Colors.green:Colors.red) : ((planIsActive0 == 'true')? Colors.green:Colors.red),
+                  ),
+                )
+              ],
             ),
             Center(
               child: Row(
@@ -431,18 +430,53 @@ class _DashboardPageState extends State<DashboardPage> {
                     minValue: 0,
                     maxValue: 365,
                     haptics: true,
-                    itemHeight: MediaQuery.of(context).size.height/25,
+                    itemWidth: MediaQuery.of(context).size.width/10,
+                    itemHeight: MediaQuery.of(context).size.height/30,
                     selectedTextStyle: TextStyle(
                       color: Colors.white,
-                      fontSize: MediaQuery.of(context).size.height/30,
+                      fontSize: MediaQuery.of(context).size.height/35,
                     ),
                     textStyle: TextStyle(
                       color: Colors.grey,
-                      fontSize: MediaQuery.of(context).size.height/40,
+                      fontSize: MediaQuery.of(context).size.height/45,
                     ),
                     onChanged: (value) => setState(() {
                       interval = value;
                     }),
+                  ),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    // Display a CupertinoPicker with list of fruits.
+                    onPressed: () => _showDialog(
+                      CupertinoPicker(
+                        magnification: 1.22,
+                        squeeze: 1.2,
+                        useMagnifier: true,
+                        itemExtent: 32.0,
+                        // This sets the initial item.
+                        scrollController: FixedExtentScrollController(
+                          initialItem: _selectedTimeUnit,
+                        ),
+                        // This is called when selected item is changed.
+                        onSelectedItemChanged: (int selectedItem) {
+                          setState(() {
+                            _selectedTimeUnit = selectedItem;
+                          });
+                        },
+                        children:
+                        List<Widget>.generate(timeUnits.length, (int index) {
+                          return Center(child: Text(timeUnits[index]));
+                        }),
+                      ),
+                    ),
+                    // This displays the selected fruit name.
+                    child: Text(
+                      timeUnits[_selectedTimeUnit],
+                      style: TextStyle(
+                          fontSize: MediaQuery.of(context).size.height/40,
+                          color: Colors.white
+                      ),
+                    ),
                   ),
                 ],
               )
@@ -513,7 +547,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 ElevatedButton(
                   onPressed: () {
                     String timeout = '${duration.inHours}:${duration.inMinutes.remainder(60)}';
-                    planCommand(_currentIndexData, timeout, interval, _currentPlan);
+                    String timeFrequency = interval.toString() + timeUnits[_selectedTimeUnit].substring(0,1);
+                    planCommand(_currentIndexData, timeout, timeFrequency, _currentPlan);
                   },
                   style: ElevatedButton.styleFrom(
                     foregroundColor: Colors.white, backgroundColor: Colors.yellow, shape: RoundedRectangleBorder(
